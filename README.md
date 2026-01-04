@@ -268,5 +268,4 @@ docker exec onlyoffice curl http://localhost/healthcheck   # Should return OK
 
 This setup is stable, secure, and optimized for Persian language use.
 ```
-
-این کل محتوا رو یکجا کپی کن و در یک فایل متنی (مثل README.md) ذخیره کن. حالا راحت می‌تونی کلش رو انتخاب و کپی کنی! 😊
+😊
