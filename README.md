@@ -1,10 +1,10 @@
+```markdown
 # Nextcloud + OnlyOffice Deployment Guide
 ## Production-Ready Docker Setup with Persian (Farsi) Font Support and RTL Notes
 
-This document provides a complete, step-by-step guide to deploying Nextcloud with OnlyOffice Document Server using Docker. It includes Persian font installation, RTL behavior observations, and troubleshooting tips.
+This document provides a complete, step-by-step guide to deploying Nextcloud with OnlyOffice Document Server using Docker. It includes Persian font installation, RTL behavior observations, LDAP authentication setup, and troubleshooting tips.
 
 Tested configuration:
-- Ubuntu LTS 22.04 OR 24.04
 - Nextcloud 32.0.3
 - OnlyOffice Document Server latest (9.2.1 at time of testing)
 - PostgreSQL 16
@@ -160,9 +160,51 @@ Save and test the connection.
 
 ---
 
-## 7. Persian Font Installation for OnlyOffice
+## 7. LDAP Authentication Integration (Active Directory or OpenLDAP)
 
-### 7.1 Download and Place Fonts on Host
+### 7.1 Install and Enable LDAP App
+The LDAP app is usually pre-installed in official Nextcloud images. If not:
+```bash
+docker exec -u www-data nextcloud-app php occ app:install user_ldap
+docker exec -u www-data nextcloud-app php occ app:enable user_ldap
+```
+
+### 7.2 Activate LDAP Provider Factory (Optional - for automatic enabling)
+Add to `/data/nextcloud/docker/nextcloud_config/config.php`:
+```php
+'ldapProviderFactory' => 'OCA\\User_LDAP\\LDAPProviderFactory',
+```
+
+### 7.3 Configure LDAP in Nextcloud GUI
+Go to **Nextcloud → Settings → Administration → LDAP / AD integration**:
+
+1. **Server tab**:
+   - Host: Your LDAP server (e.g., `ldap.company.com` or IP)
+   - Port: 389 (LDAP) or 636 (LDAPS)
+   - User DN: `cn=admin,dc=company,dc=com`
+   - Password: Admin password
+   - Base DN: `dc=company,dc=com`
+
+2. **Users tab**:
+   - Object classes: `inetOrgPerson`, `organizationalPerson`, `person` (for OpenLDAP) or `user` (for AD)
+   - Login filter: `(&(objectClass=user)(sAMAccountName=%uid))` for AD
+
+3. **Groups tab**:
+   - Configure group mapping as needed
+
+4. **Advanced tab**:
+   - Enable "Use TLS" if needed
+   - Test base DN and login attributes
+
+5. **Verify Configuration** → Test and apply
+
+Users will now authenticate via LDAP/AD.
+
+---
+
+## 8. Persian Font Installation for OnlyOffice
+
+### 8.1 Download and Place Fonts on Host
 Example using Vazir (recommended modern Persian font):
 ```bash
 cd /opt/nextcloud-docker/onlyoffice-fonts
@@ -173,10 +215,10 @@ wget https://github.com/rastikerdar/vazir-font/releases/download/v27.2.2/Vazir-B
 
 (Alternative: Sahel, B Nazanin, or any TTF Persian font collection.)
 
-### 7.2 Mount Fonts (already in compose file)
+### 8.2 Mount Fonts (already in compose file)
 The volume mount makes fonts available inside the container.
 
-### 7.3 Refresh Font Cache and Generate AllFonts.js
+### 8.3 Refresh Font Cache and Generate AllFonts.js
 ```bash
 docker exec -it onlyoffice fc-cache -fv
 docker exec -it onlyoffice /usr/bin/documentserver-generate-allfonts.sh
@@ -191,27 +233,27 @@ docker exec -it onlyoffice grep -i vazir /var/www/onlyoffice/documentserver/serv
 
 ---
 
-## 8. Persian RTL Behavior Notes
+## 9. Persian RTL Behavior Notes
 
-### 8.1 Word Documents (DOCX)
+### 9.1 Word Documents (DOCX)
 - Full RTL support
 - Correct text shaping and ligatures
 - Persian fonts selectable and render properly
 
-### 8.2 Spreadsheets (XLSX) – Known Limitation
+### 9.2 Spreadsheets (XLSX) – Known Limitation
 - Text may appear disconnected or reversed
 - RTL alignment is inconsistent
 - Root cause: OnlyOffice Spreadsheet Editor has limited RTL shaping support for Persian/Arabic
 - This is an upstream OnlyOffice limitation (not a configuration issue)
 - Workaround: Use Collabora Online for better spreadsheet RTL if needed
 
-### 8.3 General Recommendations
+### 9.3 General Recommendations
 - Set Nextcloud language to Persian (fa) for full UI RTL
 - Use modern fonts like Vazir or Sahel for best results
 
 ---
 
-## 9. Key config.php Settings (Reference)
+## 10. Key config.php Settings (Reference)
 Important sections (passwords/JWT masked):
 ```php
 'trusted_domains' => 
@@ -233,25 +275,31 @@ array (
   'internal_url' => 'http://onlyoffice/',
   'public_url' => 'http://YOUR_SERVER_IP:8081/',
 ),
+'ldapProviderFactory' => 'OCA\\User_LDAP\\LDAPProviderFactory',
 ```
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
-### 10.1 OnlyOffice Connection Issues
+### 11.1 OnlyOffice Connection Issues
 - Verify JWT secret match
 - Use internal URL `http://onlyoffice:80` for server-to-server requests
 - Check trusted_domains includes container names
 
-### 10.2 Font Issues
+### 11.2 Font Issues
 - Re-run `fc-cache` and `documentserver-generate-allfonts.sh`
 - Restart OnlyOffice container
 
-### 10.3 RTL in Spreadsheets
+### 11.3 LDAP Issues
+- Check LDAP server connectivity from container
+- Verify bind DN and password
+- Check Nextcloud logs for LDAP errors
+
+### 11.4 RTL in Spreadsheets
 - Vendor limitation – consider Collabora Online alternative
 
-### 10.4 General Validation
+### 11.5 General Validation
 ```bash
 docker ps                    # All containers healthy
 docker logs onlyoffice | grep Version   # Confirm version
@@ -260,12 +308,12 @@ docker exec onlyoffice curl http://localhost/healthcheck   # Should return OK
 
 ---
 
-## 11. Production Recommendations
+## 12. Production Recommendations
 - Use reverse proxy (Nginx/Traefik) with HTTPS and proper domain
 - Regular backups of volumes
 - Monitor resource usage (OnlyOffice is RAM-intensive)
 - Update images periodically and re-run font generation
 
-This setup is stable, secure, and optimized for Persian language use.
+This setup is stable, secure, and optimized for Persian language use with LDAP authentication.
 ```
 😊
