@@ -9,7 +9,7 @@ Tested configuration:
 - OnlyOffice Document Server latest (9.2.1 at time of testing)
 - PostgreSQL 16
 - Docker + Docker Compose
-
+- Security Hardening
 ---
 
 ## 1. Operating System Preparation
