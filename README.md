@@ -2,7 +2,7 @@
 # Nextcloud + OnlyOffice Deployment Guide
 ## Production-Ready Docker Setup with Persian (Farsi) Font Support and RTL Notes
 
-This document provides a complete, step-by-step guide to deploying Nextcloud with OnlyOffice Document Server using Docker. It includes Persian font installation, RTL behavior observations, LDAP authentication setup, and troubleshooting tips.
+This document provides a complete, step-by-step guide to deploying Nextcloud with OnlyOffice Document Server using Docker. It includes Persian font installation, RTL behavior observations, LDAP authentication setup, security hardening, and troubleshooting tips.
 
 Tested configuration:
 - Nextcloud 32.0.3
@@ -54,6 +54,8 @@ docker compose version
 ```bash
 sudo mkdir -p /data/nextcloud/docker/{db,nextcloud_data,nextcloud_config}
 sudo mkdir -p /opt/nextcloud-docker/onlyoffice-fonts
+sudo mkdir -p /opt/nextcloud-docker/php
+sudo mkdir -p /opt/nextcloud-docker/apache
 ```
 
 ---
@@ -96,6 +98,8 @@ services:
     volumes:
       - /data/nextcloud/docker/nextcloud_data:/var/www/html/data
       - /data/nextcloud/docker/nextcloud_config:/var/www/html/config
+      - /opt/nextcloud-docker/php/custom.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - /opt/nextcloud-docker/apache/security.conf:/etc/apache2/conf-available/security.conf:ro
     restart: unless-stopped
     networks:
       - nextcloud-net
@@ -104,8 +108,8 @@ services:
     image: onlyoffice/documentserver:latest
     container_name: onlyoffice
     restart: unless-stopped
-    ports:
-      - "8081:80"
+    # ports:  # External port removed for security - use internal communication only
+    #   - "8081:80"
     environment:
       JWT_ENABLED: 'true'
       JWT_SECRET: 'CHANGE_TO_SECURE_JWT_SECRET'
@@ -148,11 +152,11 @@ docker exec -u www-data nextcloud-app php occ app:install onlyoffice
 docker exec -u www-data nextcloud-app php occ app:enable onlyoffice
 ```
 
-Configure in **Nextcloud → Settings → Administration → ONLYOFFICE**:
-- Document Editing Service address: `http://SERVER_IP:8081` (external)
+Configure in **Nextcloud → Settings → Administration → ONLYOFFICE** (internal-only recommended for security):
+- Document Editing Service address: `http://onlyoffice`
 - Advanced server settings:
-  - Document server address for internal requests: `http://onlyoffice:80`
-  - Server address for internal requests from the Document Editing Service: `http://SERVER_IP` (or `http://app:80`)
+  - Document server address for internal requests: `http://onlyoffice`
+  - Server address for internal requests from the Document Editing Service: `http://app`
 - Enable JWT and set secret matching the one in `docker-compose.yml`
 - Header: `Authorization`
 
@@ -163,42 +167,19 @@ Save and test the connection.
 ## 7. LDAP Authentication Integration (Active Directory or OpenLDAP)
 
 ### 7.1 Install and Enable LDAP App
-The LDAP app is usually pre-installed in official Nextcloud images. If not:
 ```bash
 docker exec -u www-data nextcloud-app php occ app:install user_ldap
 docker exec -u www-data nextcloud-app php occ app:enable user_ldap
 ```
 
-### 7.2 Activate LDAP Provider Factory (Optional - for automatic enabling)
+### 7.2 Activate LDAP Provider Factory
 Add to `/data/nextcloud/docker/nextcloud_config/config.php`:
 ```php
 'ldapProviderFactory' => 'OCA\\User_LDAP\\LDAPProviderFactory',
 ```
 
 ### 7.3 Configure LDAP in Nextcloud GUI
-Go to **Nextcloud → Settings → Administration → LDAP / AD integration**:
-
-1. **Server tab**:
-   - Host: Your LDAP server (e.g., `ldap.company.com` or IP)
-   - Port: 389 (LDAP) or 636 (LDAPS)
-   - User DN: `cn=admin,dc=company,dc=com`
-   - Password: Admin password
-   - Base DN: `dc=company,dc=com`
-
-2. **Users tab**:
-   - Object classes: `inetOrgPerson`, `organizationalPerson`, `person` (for OpenLDAP) or `user` (for AD)
-   - Login filter: `(&(objectClass=user)(sAMAccountName=%uid))` for AD
-
-3. **Groups tab**:
-   - Configure group mapping as needed
-
-4. **Advanced tab**:
-   - Enable "Use TLS" if needed
-   - Test base DN and login attributes
-
-5. **Verify Configuration** → Test and apply
-
-Users will now authenticate via LDAP/AD.
+Go to **Nextcloud → Settings → Administration → LDAP / AD integration** and follow standard configuration for your LDAP/AD server.
 
 ---
 
@@ -215,10 +196,7 @@ wget https://github.com/rastikerdar/vazir-font/releases/download/v27.2.2/Vazir-B
 
 (Alternative: Sahel, B Nazanin, or any TTF Persian font collection.)
 
-### 8.2 Mount Fonts (already in compose file)
-The volume mount makes fonts available inside the container.
-
-### 8.3 Refresh Font Cache and Generate AllFonts.js
+### 8.2 Refresh Font Cache and Generate AllFonts.js
 ```bash
 docker exec -it onlyoffice fc-cache -fv
 docker exec -it onlyoffice /usr/bin/documentserver-generate-allfonts.sh
@@ -253,7 +231,48 @@ docker exec -it onlyoffice grep -i vazir /var/www/onlyoffice/documentserver/serv
 
 ---
 
-## 10. Key config.php Settings (Reference)
+## 10. Security Hardening
+
+### 10.1 Hide PHP and Apache Version Headers
+Create `/opt/nextcloud-docker/php/custom.ini`:
+```
+expose_php = Off
+```
+
+Create `/opt/nextcloud-docker/apache/security.conf`:
+```
+ServerTokens Prod
+ServerSignature Off
+Header always unset X-Powered-By
+```
+
+These files are mounted in the `app` service volumes (see compose file).
+
+Apply changes:
+```bash
+docker compose down
+docker compose up -d
+```
+
+### 10.2 Block /status.php (Prevent Version Leak)
+Rename the file (Nextcloud does not require it):
+```bash
+docker exec -it nextcloud-app mv /var/www/html/status.php /var/www/html/status.php.disabled
+docker compose restart app
+```
+
+### 10.3 Close OnlyOffice External Port
+Remove the ports section from the onlyoffice service in compose (use internal communication only).
+
+Apply changes:
+```bash
+docker compose down
+docker compose up -d
+```
+
+---
+
+## 11. Key config.php Settings (Reference)
 Important sections (passwords/JWT masked):
 ```php
 'trusted_domains' => 
@@ -280,26 +299,22 @@ array (
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
-### 11.1 OnlyOffice Connection Issues
+### 12.1 OnlyOffice Connection Issues
 - Verify JWT secret match
-- Use internal URL `http://onlyoffice:80` for server-to-server requests
+- Use internal URL `http://onlyoffice` for server-to-server requests
 - Check trusted_domains includes container names
 
-### 11.2 Font Issues
+### 12.2 Font Issues
 - Re-run `fc-cache` and `documentserver-generate-allfonts.sh`
 - Restart OnlyOffice container
 
-### 11.3 LDAP Issues
+### 12.3 LDAP Issues
 - Check LDAP server connectivity from container
 - Verify bind DN and password
-- Check Nextcloud logs for LDAP errors
 
-### 11.4 RTL in Spreadsheets
-- Vendor limitation – consider Collabora Online alternative
-
-### 11.5 General Validation
+### 12.4 General Validation
 ```bash
 docker ps                    # All containers healthy
 docker logs onlyoffice | grep Version   # Confirm version
@@ -308,12 +323,12 @@ docker exec onlyoffice curl http://localhost/healthcheck   # Should return OK
 
 ---
 
-## 12. Production Recommendations
+## 13. Production Recommendations
 - Use reverse proxy (Nginx/Traefik) with HTTPS and proper domain
 - Regular backups of volumes
 - Monitor resource usage (OnlyOffice is RAM-intensive)
 - Update images periodically and re-run font generation
 
-This setup is stable, secure, and optimized for Persian language use with LDAP authentication.
+This setup is stable, secure, and optimized for Persian language use with LDAP authentication and security hardening.
 ```
 😊
